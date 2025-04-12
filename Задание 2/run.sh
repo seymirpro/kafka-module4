@@ -178,3 +178,80 @@ echo "your-password" > kafka-1-creds/kafka-1_truststore_creds
 echo "your-password" > kafka-2-creds/kafka-2_sslkey_creds
 echo "your-password" > kafka-2-creds/kafka-2_keystore_creds
 echo "your-password" > kafka-2-creds/kafka-2_truststore_creds
+
+########################################################################################################
+cd kafka-0-creds
+
+"/mnt/c/Program Files/Amazon Corretto/jdk11.0.18_10/bin/keytool.exe" -importkeystore \
+  -srckeystore kafka.keystore.pkcs12 \
+  -srcstoretype PKCS12 \
+  -destkeystore kafka.keystore.jks \
+  -deststoretype JKS
+
+cd ..
+cd kafka-1-creds
+
+"/mnt/c/Program Files/Amazon Corretto/jdk11.0.18_10/bin/keytool.exe" -importkeystore \
+  -srckeystore kafka.keystore.pkcs12 \
+  -srcstoretype PKCS12 \
+  -destkeystore kafka.keystore.jks \
+  -deststoretype JKS
+
+cd ..
+cd kafka-2-creds
+
+"/mnt/c/Program Files/Amazon Corretto/jdk11.0.18_10/bin/keytool.exe" -importkeystore \
+  -srckeystore kafka.keystore.pkcs12 \
+  -srcstoretype PKCS12 \
+  -destkeystore kafka.keystore.jks \
+  -deststoretype JKS
+
+cd ..
+
+############################################################################################################################
+# Проверим SSL настройку
+openssl s_client -connect localhost:9092 -CAfile ca.pem
+
+############################################################################################################################
+# Создадим два топика
+docker exec -it kafka-0 bash
+
+# Для создания топика topic-1 (доступен и для продюсеров, и для консьюмеров):
+kafka-topics.sh --create --topic topic-1 --bootstrap-server localhost:9093 --partitions 1 --replication-factor 1
+
+# Для создания топика topic-2 (доступен только для продюсеров, но не для консьюмеров):
+kafka-topics.sh --create --topic topic-2 --bootstrap-server localhost:9093 --partitions 1 --replication-factor 1
+
+# Даем доступ для продюсеров:
+kafka-acls.sh --authorizer-properties zookeeper.connect=localhost:2181 --add --allow-principal User:producer --operation Write --topic topic-1
+
+# Даем доступ для консьюмеров:
+
+kafka-acls.sh --authorizer-properties zookeeper.connect=localhost:2181 --add --allow-principal User:consumer --operation Read --topic topic-1
+
+# Настройка прав доступа для topic-2 (только для продюсеров):
+# Даем доступ для продюсеров:
+
+kafka-acls.sh --authorizer-properties zookeeper.connect=localhost:2181 --add --allow-principal User:producer --operation Write --topic topic-2
+
+
+# Не даем доступ для консьюмеров (убираем право на чтение):
+kafka-acls.sh --authorizer-properties zookeeper.connect=localhost:2181 --add --deny-principal User:consumer --operation Read --topic topic-2
+
+# Тестирование с kafka-producer для topic-1 и topic-2
+kafka-console-producer.sh --broker-list localhost:9093 --topic topic-1
+
+# Для topic-2 продюсер также должен иметь возможность отправлять сообщения.
+
+kafka-console-producer.sh --broker-list localhost:9093 --topic topic-2
+
+
+# Тестирование с kafka-consumer для topic-1 и topic-2
+kafka-console-consumer.sh --bootstrap-server localhost:9093 --topic topic-1 --from-beginning
+
+
+# Для topic-2 консьюмер не должен иметь возможности читать сообщения (должен быть отказ в доступе):
+kafka-console-consumer.sh --bootstrap-server localhost:9093 --topic topic-2 --from-beginning
+
+# Для проверки текущих ACL в вашем кластере Kafka выполните следующую команду:
+kafka-acls.sh --authorizer-properties zookeeper.connect=localhost:2181 --list
